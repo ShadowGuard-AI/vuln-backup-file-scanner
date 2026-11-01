@@ -34,6 +34,9 @@ def is_valid_url(url):
     """
     try:
         result = urlparse(url)
+        # This only checks that a scheme and a host are present. Any scheme
+        # passes, not just http and https, so a odd scheme fails later at the
+        # request, not here.
         return all([result.scheme, result.netloc])  # Check for scheme (e.g., http, https) and network location (e.g., example.com)
     except:
         return False
@@ -73,6 +76,9 @@ def scan_for_backup_files(base_url, timeout=10):
     url_path = parsed.path or "/"
     if url_path.endswith('/'):
         directory = url_path
+        # A directory URL gives me no file name to hang an extension on, so I
+        # probe index.html by convention. If the site serves its home page
+        # under a different name, these probes miss its backups entirely.
         filename = "index.html"
     else:
         directory = url_path.rsplit('/', 1)[0] + '/'
@@ -95,6 +101,9 @@ def scan_for_backup_files(base_url, timeout=10):
         if status != 200:
             logging.debug(f"URL {backup_url} returned status code: {status}")
             continue
+        # The catchall test only bites when the baseline itself came back
+        # 200. A baseline that errored tells me nothing about how this
+        # directory answers missing files, so I fall back to status alone.
         if baseline is not None and baseline[0] == 200 and baseline[1] == body:
             logging.debug(f"URL {backup_url} matches the catchall baseline; not a finding.")
             continue
@@ -129,6 +138,9 @@ def main():
         logging.error("No probe reached the target. Scan not performed; no verdict is available.")
         sys.exit(1)
 
+    # The output file is only written inside this branch. A scan that finds
+    # nothing leaves no file behind, so a missing output file means a clean
+    # scan or a failed run, never an empty result set saved to disk.
     if found_files:
         logging.info("Found the following backup files:")
         for file in found_files:
