@@ -34,11 +34,11 @@ def is_valid_url(url):
     """
     try:
         result = urlparse(url)
-        # This only checks that a scheme and a host are present. Any scheme
-        # passes, not just http and https, so a odd scheme fails later at the
-        # request, not here.
-        return all([result.scheme, result.netloc])  # Check for scheme (e.g., http, https) and network location (e.g., example.com)
-    except:
+        # Only http and https are accepted: requests has no adapter for
+        # other schemes, so accepting them here only deferred the failure
+        # to the first request with a confusing adapter error.
+        return result.scheme in ("http", "https") and bool(result.netloc)
+    except Exception:
         return False
 
 def fetch_probe(session, url, timeout):
@@ -126,6 +126,13 @@ def main():
         logging.error("Invalid URL provided.")
         sys.exit(1)
 
+    # A timeout of zero or less makes urllib3 raise ValueError, which is
+    # not a RequestException and used to escape as an uncaught traceback.
+    # Reject it up front with a clean error instead.
+    if args.timeout <= 0:
+        logging.error("Invalid timeout. Timeout must be a positive number of seconds.")
+        sys.exit(1)
+
     logging.info(f"Scanning for backup files at: {args.url}")
     try:
         found_files, probes_reached = scan_for_backup_files(args.url, timeout=args.timeout)
@@ -138,24 +145,26 @@ def main():
         logging.error("No probe reached the target. Scan not performed; no verdict is available.")
         sys.exit(1)
 
-    # The output file is only written inside this branch. A scan that finds
-    # nothing leaves no file behind, so a missing output file means a clean
-    # scan or a failed run, never an empty result set saved to disk.
     if found_files:
         logging.info("Found the following backup files:")
         for file in found_files:
             logging.info(file)
-
-        if args.output:
-            try:
-                with open(args.output, "w") as f:
-                    for file in found_files:
-                        f.write(file + "\n")
-                logging.info(f"Results saved to: {args.output}")
-            except IOError as e:
-                logging.error(f"Error writing to file: {e}")
     else:
         logging.info("No backup files found.")
+
+    # Write the output file on every completed scan, including a clean
+    # one (the file is then empty), so a missing file unambiguously means
+    # the run failed. A write failure exits non-zero instead of leaving
+    # the operator believing results were saved.
+    if args.output:
+        try:
+            with open(args.output, "w") as f:
+                for file in found_files:
+                    f.write(file + "\n")
+            logging.info(f"Results saved to: {args.output}")
+        except IOError as e:
+            logging.error(f"Error writing to file: {e}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
